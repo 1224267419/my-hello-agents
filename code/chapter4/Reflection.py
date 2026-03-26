@@ -1,13 +1,16 @@
 from typing import List, Dict, Any
+
 # 假设 llm_client.py 文件已存在，并从中导入 HelloAgentsLLM 类
 from llm_client import HelloAgentsLLM
 
 # --- 模块 1: 记忆模块 ---
 
+
 class Memory:
     """
     一个简单的短期记忆模块，用于存储智能体的行动与反思轨迹。
     """
+
     def __init__(self):
         # 初始化一个空列表来存储所有记录
         self.records: List[Dict[str, Any]] = []
@@ -43,6 +46,7 @@ class Memory:
             if record['type'] == 'execution':
                 return record['content']
         return None
+
 
 # --- 模块 2: Reflection 智能体 ---
 
@@ -94,8 +98,9 @@ REFINE_PROMPT_TEMPLATE = """
 请直接输出优化后的代码，不要包含任何额外的解释。
 """
 
+
 class ReflectionAgent:
-    def __init__(self, llm_client, max_iterations=3):
+    def __init__(self, llm_client, max_iterations=2):
         self.llm_client = llm_client
         self.memory = Memory()
         self.max_iterations = max_iterations
@@ -120,7 +125,7 @@ class ReflectionAgent:
             feedback = self._get_llm_response(reflect_prompt)
             self.memory.add_record("reflection", feedback)
 
-            # b. 检查是否需要停止
+            # b. 检查是否需要停止,有无需改进则直接停 , 在prompt里面有写
             if "无需改进" in feedback or "no need for improvement" in feedback.lower():
                 print("\n✅ 反思认为代码已无需改进，任务完成。")
                 break
@@ -128,13 +133,12 @@ class ReflectionAgent:
             # c. 优化
             print("\n-> 正在进行优化...")
             refine_prompt = REFINE_PROMPT_TEMPLATE.format(
-                task=task,
-                last_code_attempt=last_code,
-                feedback=feedback
+                task=task, last_code_attempt=last_code, feedback=feedback
             )
             refined_code = self._get_llm_response(refine_prompt)
+            # 份新代码塞进短期短记忆模块里覆盖旧数据
             self.memory.add_record("execution", refined_code)
-        
+
         final_code = self.memory.get_last_execution()
         print(f"\n--- 任务完成 ---\n最终生成的代码:\n{final_code}")
         return final_code
@@ -146,6 +150,7 @@ class ReflectionAgent:
         response_text = self.llm_client.think(messages=messages) or ""
         return response_text
 
+
 if __name__ == '__main__':
     # 1. 初始化LLM客户端 (请确保你的 .env 和 llm_client.py 文件配置正确)
     try:
@@ -155,9 +160,8 @@ if __name__ == '__main__':
         exit()
 
     # 2. 初始化 Reflection 智能体，设置最多迭代2轮
-    agent = ReflectionAgent(llm_client, max_iterations=2)
+    agent = ReflectionAgent(llm_client, max_iterations=10)
 
     # 3. 定义任务并运行智能体
-    task = "编写一个Python函数，找出1到n之间所有的素数 (prime numbers)。"
+    task = "我想计算第 100 万个斐波那契数（Fibonacci number）对 $10^9 + 7$ 取模的结果。请不要给我提供递归或者简单的 for 循环相加的代码，因为时间复杂度是 $\mathcal{O}(n)$，太慢了。请提供一种时间复杂度为 $\mathcal{O}(\log n)$ 的算法代码"
     agent.run(task)
-
