@@ -20,8 +20,9 @@ from tavily import TavilyClient
 load_dotenv()
 
 
-# 定义状态结构
+# 定义状态结构,确保数据类型一定
 class SearchState(TypedDict):
+
     messages: Annotated[list, add_messages]
     user_query: str  # 用户查询
     search_query: str  # 优化后的搜索查询
@@ -53,21 +54,23 @@ def understand_query_node(state: SearchState) -> SearchState:
             break
 
     understand_prompt = f"""分析用户的查询："{user_message}"
-
+    
 请完成两个任务：
 1. 简洁总结用户想要了解什么
 2. 生成最适合搜索的关键词（中英文均可，要精准）
 
 格式：
 理解：[用户需求总结]
-搜索词：[最佳搜索关键词]"""
+搜索词：[最佳搜索关键词]
+"""
 
     response = llm.invoke([SystemMessage(content=understand_prompt)])
 
     # 提取搜索关键词
     response_text = response.content
-    search_query = user_message  # 默认使用原始查询
+    search_query = user_message  # 如果没有按格式输出,则使用原始查询
 
+    # LLM 的响应文本中基于规则解析出搜索关键词。
     if "搜索词：" in response_text:
         search_query = response_text.split("搜索词：")[1].strip()
     elif "搜索关键词：" in response_text:
@@ -102,11 +105,15 @@ def tavily_search_node(state: SearchState) -> SearchState:
         search_results = ""
 
         # 优先使用Tavily的综合答案
+        # Tavily 的 include_answer=True 会返回一个 AI 生成的综合答案。这个答案质量通常较高，所以优先放在结果最前面。
         if response.get("answer"):
             search_results = f"综合答案：\n{response['answer']}\n\n"
 
         # 添加具体的搜索结果
+        # .get() 方法用于安全地获取字典中的值，如果键不存在，则返回默认值（这里是空字符串或空列表），
+        # 避免程序因 KeyError 而崩溃。
         if response.get("results"):
+            # 提取 title、content、url 拼接成结构化文本
             search_results += "相关信息：\n"
             for i, result in enumerate(response["results"][:3], 1):
                 title = result.get("title", "")
@@ -130,6 +137,7 @@ def tavily_search_node(state: SearchState) -> SearchState:
         print(f"❌ {error_msg}")
 
         return {
+            # 搜索失败，不适用搜索 , LLM直接生成回答
             "search_results": f"搜索失败：{error_msg}",
             "step": "search_failed",
             "messages": [
@@ -187,6 +195,7 @@ def create_search_assistant():
     workflow = StateGraph(SearchState)
 
     # 添加三个节点
+    # add_edge 定义的是无条件边——不管节点返回什么，都固定走到下一个节点。节点的添加顺序（add_node）本身不影响执行顺序，真正决定执行顺序的是 add_edge 的连接关系。
     workflow.add_node("understand", understand_query_node)
     workflow.add_node("search", tavily_search_node)
     workflow.add_node("answer", generate_answer_node)
@@ -197,7 +206,9 @@ def create_search_assistant():
     workflow.add_edge("search", "answer")
     workflow.add_edge("answer", END)
 
-    # 编译图
+    # 编译图+ 绑定状态管理，生成可执行的应用
+    # compile()：把你用 add_node / add_edge 定义的图结构编译成可执行的应用（类似把蓝图变成实际机器）。
+    # checkpointer=memory：告诉编译后的 app，每经过一个节点就自动保存一次 State 快照。
     memory = InMemorySaver()
     app = workflow.compile(checkpointer=memory)
 
